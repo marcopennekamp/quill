@@ -43,4 +43,17 @@ class ExpandNestedQueriesSpec extends Spec {
     ).string mustEqual
       "SELECT x.camel_case, x._2 FROM (SELECT e.camel_case camel_case, 1 _2 FROM entity e) x"
   }
+
+  "select tuple elements correctly" in {
+    import testContext._
+
+    // println("da")
+
+    testContext.run(
+      query[TestEntity].join(query[TestEntity2]).on { case (e1, e2) => e1.i == e2.i }
+        .filter(_._1.o.isDefined)
+        .join(query[TestEntity3]).on { case ((_, e2), e3) => e2.o == e3.o }
+    ).string mustEqual "" // TODO: Add correct query.
+  }
+
 }

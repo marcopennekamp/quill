@@ -18,10 +18,31 @@ import io.getquill.context.sql.FlatJoinContext
 
 object ExpandNestedQueries {
 
+  private def matchName(x: FromContext): String = x match {
+    case QueryContext(_, alias)   => alias
+    case TableContext(_, alias)   => alias
+    case InfixContext(_, alias)   => alias
+    case JoinContext(_, _, _, _)  => ???
+    case FlatJoinContext(_, _, _) => ???
+  }
+
   def apply(q: SqlQuery, references: collection.Set[Property]): SqlQuery =
     q match {
       case q: FlattenSqlQuery =>
-        expandNested(q.copy(select = expandSelect(q.select, references)))
+        var select = q.from.flatMap {
+          case JoinContext(t, a, b, on) =>
+            val aName = matchName(a)
+            val bName = matchName(b)
+            List(SelectValue(Ident(aName)), SelectValue(Ident(bName)))
+          case _ => List.empty
+        }
+
+        if (select.isEmpty) {
+          select = expandSelect(q.select, references)
+        }
+
+        println("flatten sql query: " + q)
+        expandNested(q.copy(select = select))
       case SetOperationSqlQuery(a, op, b) =>
         SetOperationSqlQuery(apply(a, references), op, apply(b, references))
       case UnaryOperationSqlQuery(op, q) =>
@@ -32,6 +53,8 @@ object ExpandNestedQueries {
     q match {
       case FlattenSqlQuery(from, where, groupBy, orderBy, limit, offset, select, distinct) =>
         val asts = Nil ++ where ++ groupBy ++ orderBy.map(_.ast) ++ limit ++ offset ++ select.map(_.ast)
+        println("expand nested asts: " + asts)
+        println("expand nested q from: " + q.from)
         val from = q.from.map(expandContext(_, asts))
         q.copy(from = from)
     }
@@ -39,25 +62,77 @@ object ExpandNestedQueries {
   private def expandContext(s: FromContext, asts: List[Ast]): FromContext =
     s match {
       case QueryContext(q, alias) =>
+        println("Query Context q: " + q)
+        println("Query Context Alias: " + alias)
+        println("Query Context Asts: " + asts)
         QueryContext(apply(q, references(alias, asts)), alias)
-      case JoinContext(t, a, b, on) =>
+      case q @ JoinContext(t, a, b, on) =>
+        println("EXPAND JOIN CONTEXT: " + q)
+
+        val aName = matchName(a)
+        val bName = matchName(b)
+        println("A-Name: " + aName)
+        println("B-Name: " + bName)
+
         JoinContext(t, expandContext(a, asts :+ on), expandContext(b, asts :+ on), on)
       case FlatJoinContext(t, a, on) =>
+        println("EXPAND FLAT JOIN CONTEXT")
         FlatJoinContext(t, expandContext(a, asts :+ on), on)
       case _: TableContext | _: InfixContext => s
     }
+
+  /*FlattenSqlQuery(
+      List(
+        JoinContext(
+          InnerJoin,
+          TableContext(querySchema("TestEntity"),x01),
+          TableContext(querySchema("TestEntity2"),x11),
+          x01.i == x11.i
+        )
+      ),
+      Some(x1._1.o.isDefined),
+      List(),
+      List(),
+      None,
+      None,
+      List(SelectValue(x1,None)),
+      false
+    )*/
 
   private def expandSelect(select: List[SelectValue], references: collection.Set[Property]) =
     references.toList match {
       case Nil => select
       case refs =>
+        println("current: " + select)
+        println("refs: " + refs)
         refs.map {
-          case Property(Property(_, tupleElem), prop) =>
-            val p = Property(select(tupleElem.drop(1).toInt - 1).ast, prop)
-            SelectValue(p, Some(prop))
-          case Property(_, tupleElem) if (tupleElem.matches("_[0-9]*")) =>
+          case a @ Property(Property(l, tupleElem), prop) if (tupleElem.matches("_[0-9]*")) =>
+            /*println("case 1")
+            println("term: " + a)
+            println("_x right: " + tupleElem)
+            println("_x left: " + l)
+            println("rest prop: " + prop)*/
+            val index = tupleElem.drop(1).toInt - 1
+            if (index < select.length) {
+              val p = Property(select(tupleElem.drop(1).toInt - 1).ast, prop)
+              SelectValue(p, Some(prop))
+            } else {
+              //Property(select.head.ast, prop) // TODO: This is temporary nonsense.
+              //Property(select(tupleElem.drop(1).toInt - 1).ast, prop)
+              //SelectValue(Ident("xmyass"), Some(prop))
+              ???
+            }
+          case a @ Property(l, tupleElem) if (tupleElem.matches("_[0-9]*")) =>
+            /*println("case 2")
+            println("term: " + a)
+            println("_x right: " + tupleElem)
+            println("_x left: " + l)*/
             SelectValue(select(tupleElem.drop(1).toInt - 1).ast, Some(tupleElem))
-          case Property(_, name) =>
+          case a @ Property(l, name) =>
+            /*println("case 3")
+            println("term: " + a)
+            println("_x right: " + name)
+            println("_x left: " + l)*/
             select match {
               case List(SelectValue(i: Ident, _)) =>
                 SelectValue(Property(i, name))
@@ -67,8 +142,11 @@ object ExpandNestedQueries {
         }
     }
 
-  private def references(alias: String, asts: List[Ast]) =
+  private def references(alias: String, asts: List[Ast]) = {
+    println("References: " + asts)
     References(State(Ident(alias), Nil))(asts)(_.apply)._2.state.references.toSet
+  }
+
 }
 
 case class State(ident: Ident, references: List[Property])
