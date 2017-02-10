@@ -19,6 +19,8 @@ abstract class JdbcContext[Dialect <: SqlIdiom, Naming <: NamingStrategy](dataSo
   with Encoders
   with Decoders {
 
+  type Exec = JdbcExecutor[Dialect, Naming]
+
   private val logger: Logger =
     Logger(LoggerFactory.getLogger(classOf[JdbcContext[_, _]]))
 
@@ -70,59 +72,23 @@ abstract class JdbcContext[Dialect <: SqlIdiom, Naming <: NamingStrategy](dataSo
         }
     }
 
-  def executeQuery[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => T = identity[ResultSet] _): List[T] =
-    withConnection { conn =>
-      logger.info(sql)
-      val ps = prepare(conn.prepareStatement(sql))
-      val rs = ps.executeQuery()
-      extractResult(rs, extractor)
-    }
+  def executeQuery[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => T = identity[ResultSet] _)(implicit executor: Exec): List[T] =
+    executor.executeQuery(sql, prepare, extractor)
 
-  def executeQuerySingle[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => T = identity[ResultSet] _): T =
-    handleSingleResult(executeQuery(sql, prepare, extractor))
+  def executeQuerySingle[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => T = identity[ResultSet] _)(implicit executor: Exec): T =
+    executor.executeQuerySingle(sql, prepare, extractor)
 
-  def executeAction[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity): Long =
-    withConnection { conn =>
-      logger.info(sql)
-      prepare(conn.prepareStatement(sql)).executeUpdate().toLong
-    }
+  def executeAction[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity)(implicit executor: Exec): Long =
+    executor.executeAction(sql, prepare)
 
-  def executeActionReturning[O](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => O, returningColumn: String): O =
-    withConnection { conn =>
-      logger.info(sql)
-      val ps = prepare(conn.prepareStatement(sql, Array(returningColumn)))
-      ps.executeUpdate()
-      handleSingleResult(extractResult(ps.getGeneratedKeys, extractor))
-    }
+  def executeActionReturning[O](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => O, returningColumn: String)(implicit executor: Exec): O =
+    executor.executeActionReturning(sql, prepare, extractor, returningColumn)
 
-  def executeBatchAction(groups: List[BatchGroup]): List[Long] =
-    withConnection { conn =>
-      groups.flatMap {
-        case BatchGroup(sql, prepare) =>
-          logger.info(sql)
-          val ps = conn.prepareStatement(sql)
-          prepare.foreach { f =>
-            f(ps)
-            ps.addBatch()
-          }
-          ps.executeBatch().map(_.toLong)
-      }
-    }
+  def executeBatchAction(groups: List[BatchGroup])(implicit executor: Exec): List[Long] =
+    executor.executeBatchAction(groups.asInstanceOf[List[executor.BatchGroup]]) // TODO: Temporary fix for path-dependent type.
 
-  def executeBatchActionReturning[T](groups: List[BatchGroupReturning], extractor: ResultSet => T): List[T] =
-    withConnection { conn =>
-      groups.flatMap {
-        case BatchGroupReturning(sql, column, prepare) =>
-          logger.info(sql)
-          val ps = conn.prepareStatement(sql, Array(column))
-          prepare.foreach { f =>
-            f(ps)
-            ps.addBatch()
-          }
-          ps.executeBatch()
-          extractResult(ps.getGeneratedKeys, extractor)
-      }
-    }
+  def executeBatchActionReturning[T](groups: List[BatchGroupReturning], extractor: ResultSet => T)(implicit executor: Exec): List[T] =
+    executor.executeBatchActionReturning(groups.asInstanceOf[List[executor.BatchGroupReturning]], extractor) // TODO: Temporary fix for path-dependent type.
 
   @tailrec
   private def extractResult[T](rs: ResultSet, extractor: ResultSet => T, acc: List[T] = List()): List[T] =

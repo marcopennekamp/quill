@@ -9,7 +9,9 @@ import io.getquill.NamingStrategy
 
 trait Context[Idiom <: io.getquill.idiom.Idiom, Naming <: NamingStrategy]
   extends Closeable
-  with CoreDsl {
+  with CoreDsl
+  with BatchGroupTypes
+  with HandleSingleResult {
 
   type RunQuerySingleResult[T]
   type RunQueryResult[T]
@@ -17,9 +19,6 @@ trait Context[Idiom <: io.getquill.idiom.Idiom, Naming <: NamingStrategy]
   type RunActionReturningResult[T]
   type RunBatchActionResult
   type RunBatchActionReturningResult[T]
-
-  case class BatchGroup(string: String, prepare: List[PrepareRow => PrepareRow])
-  case class BatchGroupReturning(string: String, column: String, prepare: List[PrepareRow => PrepareRow])
 
   def probe(statement: String): Try[_]
 
@@ -29,11 +28,4 @@ trait Context[Idiom <: io.getquill.idiom.Idiom, Naming <: NamingStrategy]
   def run[T](quoted: Quoted[ActionReturning[_, T]]): RunActionReturningResult[T] = macro ActionMacro.runActionReturning[T]
   def run(quoted: Quoted[BatchAction[Action[_]]]): RunBatchActionResult = macro ActionMacro.runBatchAction
   def run[T](quoted: Quoted[BatchAction[ActionReturning[_, T]]]): RunBatchActionReturningResult[T] = macro ActionMacro.runBatchActionReturning[T]
-
-  protected def handleSingleResult[T](list: List[T]) =
-    list match {
-      case value :: Nil => value
-      case other        => throw new IllegalStateException(s"Expected a single result but got $other")
-    }
-
 }
