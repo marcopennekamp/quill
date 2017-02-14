@@ -3,24 +3,15 @@ package io.getquill.context
 import scala.language.higherKinds
 import scala.language.experimental.macros
 import io.getquill.dsl.CoreDsl
-import java.io.Closeable
-import scala.util.Try
 import io.getquill.NamingStrategy
 
-trait Context[Idiom <: io.getquill.idiom.Idiom, Naming <: NamingStrategy]
-  extends Closeable
-  with CoreDsl
-  with BatchGroupTypes
-  with HandleSingleResult {
-
+trait Context[Idiom <: io.getquill.idiom.Idiom, Naming <: NamingStrategy] extends CoreDsl with HandleSingleResult with BatchGroupTypes {
   type RunQuerySingleResult[T]
   type RunQueryResult[T]
   type RunActionResult
   type RunActionReturningResult[T]
   type RunBatchActionResult
   type RunBatchActionReturningResult[T]
-
-  def probe(statement: String): Try[_]
 
   def run[T](quoted: Quoted[T]): RunQuerySingleResult[T] = macro QueryMacro.runQuerySingle[T]
   def run[T](quoted: Quoted[Query[T]]): RunQueryResult[T] = macro QueryMacro.runQuery[T]

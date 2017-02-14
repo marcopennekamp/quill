@@ -4,10 +4,12 @@ import java.io.Closeable
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import javax.sql.DataSource
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.Logger
 import io.getquill.context.sql.idiom.SqlIdiom
-import io.getquill.NamingStrategy
+import io.getquill.{ JdbcContextConfig, NamingStrategy }
 import io.getquill.context.Executor
+import io.getquill.util.LoadConfig
 import org.slf4j.LoggerFactory
 
 import scala.annotation.tailrec
@@ -16,6 +18,10 @@ import scala.util.control.NonFatal
 
 class JdbcExecutor[Dialect <: SqlIdiom, Naming <: NamingStrategy](dataSource: DataSource with Closeable) extends Executor[JdbcContext[Dialect, Naming], Dialect, Naming] {
   override type Query = String
+
+  def this(config: JdbcContextConfig) = this(config.dataSource)
+  def this(config: Config) = this(JdbcContextConfig(config))
+  def this(configPrefix: String) = this(LoadConfig(configPrefix))
 
   private val logger: Logger =
     Logger(LoggerFactory.getLogger(classOf[JdbcContext[_, _]]))
@@ -29,9 +35,9 @@ class JdbcExecutor[Dialect <: SqlIdiom, Naming <: NamingStrategy](dataSource: Da
       finally conn.close()
     }
 
-  def close() = dataSource.close()
+  override def close() = dataSource.close()
 
-  def probe(sql: String) =
+  override def probe(sql: String) =
     Try {
       withConnection(_.createStatement.execute(sql))
     }
@@ -69,7 +75,7 @@ class JdbcExecutor[Dialect <: SqlIdiom, Naming <: NamingStrategy](dataSource: Da
   override def executeQuerySingle[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity, extractor: ResultSet => T = identity[ResultSet] _): T =
     handleSingleResult(executeQuery(sql, prepare, extractor))
 
-  override def executeAction[T](sql: String, prepare: PreparedStatement => PreparedStatement = identity): Long =
+  override def executeAction(sql: String, prepare: PreparedStatement => PreparedStatement = identity): Long =
     withConnection { conn =>
       logger.info(sql)
       prepare(conn.prepareStatement(sql)).executeUpdate().toLong

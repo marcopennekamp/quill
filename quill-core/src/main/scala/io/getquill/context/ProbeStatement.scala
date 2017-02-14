@@ -14,17 +14,17 @@ import io.getquill.idiom.Idiom
 
 object ProbeStatement {
 
-  private val cache = new Cache[Types#Type, Context[Idiom, NamingStrategy]]
+  private val cache = new Cache[Types#Type, Executor[Context[Idiom, NamingStrategy], Idiom, NamingStrategy]]
 
   def apply(statement: String, c: MacroContext) = {
     import c.universe.{ Try => _, _ }
 
-    def resolveContext(tpe: Type) =
+    def resolveExecutor(tpe: Type) =
       tpe match {
-        case tpe if (tpe <:< c.weakTypeOf[QueryProbing]) =>
-          LoadObject[Context[Idiom, NamingStrategy]](c)(tpe) match {
-            case Success(context) =>
-              Some(context)
+        case `tpe` if tpe <:< c.weakTypeOf[QueryProbing] =>
+          LoadObject[Executor[Context[Idiom, NamingStrategy], Idiom, NamingStrategy]](c)(tpe) match {
+            case Success(executor) =>
+              Some(executor)
             case Failure(ex) =>
               c.error(s"Can't load the context of type '$tpe' for compile-time query probing. Reason: '$ex'")
               None
@@ -36,7 +36,7 @@ object ProbeStatement {
     val tpe = c.prefix.tree.tpe
 
     cache
-      .getOrElseUpdate(tpe, resolveContext(tpe), 30.seconds)
+      .getOrElseUpdate(tpe, resolveExecutor(tpe), 30.seconds)
       .map(_.probe(statement))
       .map {
         case Success(_) =>
